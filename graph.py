@@ -16,6 +16,7 @@ and therefore zero LCU consumption.
 import os
 from datetime import datetime, timezone
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -140,42 +141,83 @@ def fetch_url(url: str) -> str:
 
 
 @tool
-def run_python(code: str) -> str:
+def pip_install(package: str) -> str:
+    """Install a Python package that isn't already available (requests,
+    json, math, datetime are pre-loaded — everything else needs this
+    first). Only use it when a task genuinely needs a specific library.
+    Takes a few seconds; the package is then usable in run_python."""
+    import subprocess
+    import sys
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", package],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            return f"Install failed: {result.stderr[-1000:]}"
+        return f"Installed '{package}'. You can now import it in run_python."
+    except Exception as exc:  # noqa: BLE001
+        return f"Install failed: {exc}"
+
+
+# Persistent Python namespace per conversation (thread_id), so variables
+# and functions defined in one run_python call are still available in the
+# next one within the same chat — lets the agent build things up in
+# stages instead of starting from scratch every step.
+# NOTE: this lives in server memory only. A Render restart/sleep clears
+# it, same as chat history itself on the free tier.
+_sessions: dict = {}
+
+
+@tool
+def run_python(code: str, config: RunnableConfig) -> str:
     """Execute a snippet of Python code and return whatever it prints.
-    Use this to call APIs you've discovered (e.g. with the `requests`
-    library), parse data, or do anything a pre-built tool doesn't cover.
-    Always `print()` the result you want to see — nothing is returned
-    automatically. `requests`, `json`, `math`, and `datetime` are
-    pre-imported and available.
+    Use this to call APIs you've discovered, parse data, or do anything a
+    pre-built tool doesn't cover. Always print() the result you want to
+    see. Variables and functions you define here PERSIST for the rest of
+    this conversation — you can build things up across multiple calls
+    instead of redoing everything each time. `requests`, `json`, `math`,
+    `datetime` are pre-loaded; use pip_install first for anything else.
+
+    If this errors, read the message, fix your code, and call it again —
+    your previously defined variables are unaffected by a failed call.
 
     SECURITY NOTE: this runs on the same server as everything else, with
     no sandbox. Only use this on a deployment only you can access — never
     expose an agent with this tool to untrusted/public users."""
     import contextlib
     import io
-    import json as _json
-    import math as _math
-    import requests as _requests
 
-    safe_globals = {
-        "__builtins__": __builtins__,
-        "requests": _requests,
-        "json": _json,
-        "math": _math,
-        "datetime": datetime,
-    }
+    thread_id = (config.get("configurable") or {}).get("thread_id", "default")
+    session = _sessions.setdefault(
+        thread_id,
+        {
+            "__builtins__": __builtins__,
+            "requests": __import__("requests"),
+            "json": __import__("json"),
+            "math": __import__("math"),
+            "datetime": datetime,
+        },
+    )
 
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
-            exec(code, safe_globals, {})  # noqa: S102 — intentional, see docstring
+            exec(code, session)  # noqa: S102 — intentional, see docstring
         output = buffer.getvalue().strip()
         return output if output else "(code ran with no printed output)"
     except Exception as exc:  # noqa: BLE001
-        return f"Error running code: {exc}"
+        return (
+            f"Error running code: {exc}\n"
+            "Your previously defined variables are still available — fix "
+            "just the broken part and try again."
+        )
 
 
-TOOLS = [web_search, fetch_url, run_python, calculator, current_datetime]
+TOOLS = [web_search, fetch_url, pip_install, run_python, calculator, current_datetime]
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +234,16 @@ ones pre-built for you.
   (e.g. calling some specific API), don't say you can't do it — instead:
   1. Use web_search to find the right API or documentation.
   2. Use fetch_url to read its docs / endpoint format.
-  3. Use run_python to write and execute the actual code that calls it,
+  3. Use pip_install if the task needs a library you don't already have.
+  4. Use run_python to write and execute the actual code that calls it,
      using the `requests` library, and print() the result.
+- run_python keeps your variables and functions between calls in this
+  conversation — build multi-step work up in stages rather than
+  rewriting everything from scratch each time.
+- If run_python errors, that is expected and recoverable, not a dead
+  end: read the error message, fix only the broken part, and run it
+  again. Your earlier variables are untouched by a failed call. Do this
+  automatically without asking the user for permission to retry.
 - STRONGLY prefer APIs that need no signup and no API key (e.g. Open-Meteo
   for weather, Wikipedia's API, government open-data endpoints). Many free
   APIs are genuinely keyless — look for those first.
@@ -228,4 +278,3 @@ graph = create_react_agent(
     tools=TOOLS,
     prompt=SYSTEM_PROMPT,
 )
-
