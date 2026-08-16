@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 
 
@@ -138,15 +137,15 @@ SYSTEM_PROMPT = """You are a careful, thorough personal assistant agent.
 # 4. Build the graph
 # ---------------------------------------------------------------------------
 
-# MemorySaver = in-process checkpointing keyed by thread_id, which is what
-# gives agent-chat-ui its persistent per-conversation memory. Swap this for
-# a Postgres/Sqlite checkpointer if you need memory to survive process
-# restarts on your host.
-checkpointer = MemorySaver()
-
+# No checkpointer is passed here on purpose: the LangGraph API server
+# (langgraph dev / langgraph up) provides per-thread persistence
+# automatically once deployed. Supplying your own checkpointer conflicts
+# with that and is what caused the startup error you saw. If you need to
+# point persistence at a specific Postgres database instead of the
+# platform's default, set the POSTGRES_URI environment variable — no code
+# change needed.
 graph = create_react_agent(
     build_llm(),
     tools=TOOLS,
     prompt=SYSTEM_PROMPT,
-    checkpointer=checkpointer,
 )
