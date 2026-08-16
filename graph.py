@@ -59,10 +59,18 @@ def web_search(query: str) -> str:
     """Search the public web for current information and return top results
     as short text snippets. Use this whenever the user asks about something
     recent, time-sensitive, or outside general knowledge."""
-    from duckduckgo_search import DDGS
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        return "web_search is unavailable: TAVILY_API_KEY is not set on the server."
 
-    with DDGS() as ddgs:
-        results = list(ddgs.text(query, max_results=5))
+    from tavily import TavilyClient
+
+    try:
+        client = TavilyClient(api_key=api_key)
+        response = client.search(query, max_results=5)
+        results = response.get("results", [])
+    except Exception as exc:  # noqa: BLE001
+        return f"Search failed: {exc}"
 
     if not results:
         return "No results found."
@@ -70,9 +78,9 @@ def web_search(query: str) -> str:
     lines = []
     for r in results:
         title = r.get("title", "")
-        body = r.get("body", "")
-        href = r.get("href", "")
-        lines.append(f"- {title}: {body} ({href})")
+        content = r.get("content", "")
+        url = r.get("url", "")
+        lines.append(f"- {title}: {content} ({url})")
     return "\n".join(lines)
 
 
@@ -186,6 +194,17 @@ ones pre-built for you.
   2. Use fetch_url to read its docs / endpoint format.
   3. Use run_python to write and execute the actual code that calls it,
      using the `requests` library, and print() the result.
+- STRONGLY prefer APIs that need no signup and no API key (e.g. Open-Meteo
+  for weather, Wikipedia's API, government open-data endpoints). Many free
+  APIs are genuinely keyless — look for those first.
+- If every option you find requires creating an account (email
+  verification, a dashboard signup, a paid plan), STOP after one attempt.
+  You cannot create accounts, verify emails, or solve CAPTCHAs — no
+  amount of retrying will produce a working key. Tell the user plainly
+  that the API requires a manual signup, give them the signup link, and
+  say you'll use it as soon as they provide the key. Do not invent a
+  placeholder key and run the code anyway — it will always fail and
+  wastes the user's time.
 - Think step by step for multi-part requests, and check your own work
   before answering.
 - Be direct and concise. Skip unnecessary preamble.
