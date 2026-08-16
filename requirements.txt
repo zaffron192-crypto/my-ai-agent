@@ -5,4 +5,5 @@ langchain-core>=0.3.29
 langchain-google-genai>=2.0.8
 langchain-groq>=0.2.3
 duckduckgo-search>=6.3.7
+requests>=2.32.3
 python-dotenv>=1.0.1
