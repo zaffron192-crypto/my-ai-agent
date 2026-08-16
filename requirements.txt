@@ -1,0 +1,8 @@
+langgraph>=0.2.60
+langgraph-cli[inmem]>=0.1.75
+langchain>=0.3.14
+langchain-core>=0.3.29
+langchain-google-genai>=2.0.8
+langchain-groq>=0.2.3
+duckduckgo-search>=6.3.7
+python-dotenv>=1.0.1
