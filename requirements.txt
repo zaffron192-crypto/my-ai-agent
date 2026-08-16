@@ -4,6 +4,6 @@ langchain>=0.3.14
 langchain-core>=0.3.29
 langchain-google-genai>=2.0.8
 langchain-groq>=0.2.3
-duckduckgo-search>=6.3.7
+tavily-python>=0.5.0
 requests>=2.32.3
 python-dotenv>=1.0.1
