@@ -115,17 +115,77 @@ def current_datetime() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-TOOLS = [web_search, calculator, current_datetime]
+@tool
+def fetch_url(url: str) -> str:
+    """Fetch the raw content of a specific URL (e.g. an API's documentation
+    page, or an API endpoint itself). Use this after web_search finds a
+    promising page or API you need to read before calling it. Returns up
+    to ~4000 characters of the response body."""
+    import requests
+
+    try:
+        resp = requests.get(url, timeout=15, headers={"User-Agent": "agent/1.0"})
+        resp.raise_for_status()
+        return resp.text[:4000]
+    except Exception as exc:  # noqa: BLE001
+        return f"Could not fetch '{url}': {exc}"
+
+
+@tool
+def run_python(code: str) -> str:
+    """Execute a snippet of Python code and return whatever it prints.
+    Use this to call APIs you've discovered (e.g. with the `requests`
+    library), parse data, or do anything a pre-built tool doesn't cover.
+    Always `print()` the result you want to see — nothing is returned
+    automatically. `requests`, `json`, `math`, and `datetime` are
+    pre-imported and available.
+
+    SECURITY NOTE: this runs on the same server as everything else, with
+    no sandbox. Only use this on a deployment only you can access — never
+    expose an agent with this tool to untrusted/public users."""
+    import contextlib
+    import io
+    import json as _json
+    import math as _math
+    import requests as _requests
+
+    safe_globals = {
+        "__builtins__": __builtins__,
+        "requests": _requests,
+        "json": _json,
+        "math": _math,
+        "datetime": datetime,
+    }
+
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            exec(code, safe_globals, {})  # noqa: S102 — intentional, see docstring
+        output = buffer.getvalue().strip()
+        return output if output else "(code ran with no printed output)"
+    except Exception as exc:  # noqa: BLE001
+        return f"Error running code: {exc}"
+
+
+TOOLS = [web_search, fetch_url, run_python, calculator, current_datetime]
 
 
 # ---------------------------------------------------------------------------
 # 3. System prompt
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a careful, thorough personal assistant agent.
+SYSTEM_PROMPT = """You are a careful, thorough personal assistant agent
+with the ability to discover and use new tools on the fly, not just the
+ones pre-built for you.
 
 - Use tools whenever they would make your answer more accurate, current,
   or verifiable — don't guess at facts you can look up or compute.
+- If a task needs a capability you don't have a dedicated tool for
+  (e.g. calling some specific API), don't say you can't do it — instead:
+  1. Use web_search to find the right API or documentation.
+  2. Use fetch_url to read its docs / endpoint format.
+  3. Use run_python to write and execute the actual code that calls it,
+     using the `requests` library, and print() the result.
 - Think step by step for multi-part requests, and check your own work
   before answering.
 - Be direct and concise. Skip unnecessary preamble.
@@ -149,3 +209,4 @@ graph = create_react_agent(
     tools=TOOLS,
     prompt=SYSTEM_PROMPT,
 )
+
